@@ -1,516 +1,697 @@
-import { useState, useEffect } from 'react';
-import { tokenStorage, logout } from '../api/auth';
-// motion/react 대신 표준 라이브러리인 framer-motion을 사용합니다.
-import { motion } from 'framer-motion'; 
-import { 
-  Code2, Database, Layout, Server, Smartphone, Terminal, 
-  Github, Linkedin, Mail, Award, Briefcase, Users, 
-  Trophy, Plus, LogOut, Moon, Sun, Edit 
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+  Github, Mail, Plus, LogOut, Moon, Sun, UserCircle,
+  GripVertical, Trash2, Edit3,
+  AlignLeft, AlignCenter, AlignRight, ChevronUp, ChevronDown,
+  Briefcase, Code2, FolderOpen, Trophy, ExternalLink
 } from 'lucide-react';
 
-// 상대 경로 수정: 현재 App.tsx가 있는 폴더 안의 components 폴더를 바라봅니다.
-import { SkillCard } from './components/SkillCard';
-import { ProjectCard } from './components/projectCard';
-import { ProjectModal } from './components/projectModal';
-import { SkillModal } from './components/SkillModal';
-import { TimelineItem } from './components/TimelineItem';
-import { TimelineModal } from './components/TimelineModal';
-import { AuthModal } from './components/AuthModal';
-import { EditModal } from './components/EditModal';
-import { TipsSection } from './components/TipsSection';
+import { AuthModal }    from './components/AuthModal';
+import { ProfileModal } from './components/ProfileModal';
 
-const defaultSkills = [
-  { 
-    icon: Code2, 
-    name: 'React / Next.js', 
-    level: 90,
-    experience: '3년 경력',
-    details: [
-      '복잡한 SPA(Single Page Application) 설계 및 개발',
-      'React Hooks, Context API, Redux를 활용한 상태 관리',
-      'Next.js를 이용한 SSR/SSG 구현 및 최적화',
-      'React Query를 사용한 서버 상태 관리',
-      '성능 최적화 (Code Splitting, Lazy Loading, Memoization)',
-    ]
+// ── 토큰 스토리지 ────────────────────────────────────────────
+const TOKEN_KEY   = 'portfolio_access_token';
+const REFRESH_KEY = 'portfolio_refresh_token';
+const USER_KEY    = 'portfolio_user_info';
+const tokenStorage = {
+  isLoggedIn: () => !!localStorage.getItem(TOKEN_KEY),
+  getUser: () => {
+    try { const r = localStorage.getItem(USER_KEY); return r ? JSON.parse(r) : null; }
+    catch { return null; }
   },
-  { 
-    icon: Server, 
-    name: 'Node.js / Express', 
-    level: 85,
-    experience: '2.5년 경력',
-    details: [
-      'RESTful API 설계 및 구현',
-      'Express 미들웨어를 활용한 인증/인가 시스템 구축',
-      'WebSocket을 이용한 실시간 통신 구현',
-      'API 문서화 (Swagger/OpenAPI)',
-      '에러 핸들링 및 로깅 시스템 구축',
-    ]
+  clear: () => {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(REFRESH_KEY);
+    localStorage.removeItem(USER_KEY);
   },
-  { 
-    icon: Database, 
-    name: 'PostgreSQL / MongoDB', 
-    level: 80,
-    experience: '2년 경력',
-    details: [
-      '데이터베이스 스키마 설계 및 정규화',
-      '복잡한 쿼리 작성 및 최적화',
-      'Prisma, TypeORM, Mongoose ORM 사용',
-      '인덱싱 및 성능 튜닝',
-      '트랜잭션 및 데이터 무결성 관리',
-    ]
-  },
+};
+
+// ── 타입 ─────────────────────────────────────────────────────
+type SectionType = 'intro' | 'awards' | 'timeline' | 'projects' | 'skills';
+
+interface Section { id: SectionType; label: string; icon: any; }
+
+interface IntroData {
+  html: string;
+  profileImage: string | null;
+}
+
+interface AwardItem   { id: number; title: string; description: string; icon: string; }
+interface TimelineItem { id: number; icon: string; title: string; organization: string; date: string; description: string; }
+interface ProjectItem  { id: number; title: string; description: string; tags: string[]; github: string; demo: string; }
+interface SkillItem    { id: number; name: string; level: number; experience: string; }
+
+const SECTION_META: Section[] = [
+  { id: 'intro',    label: '자기소개',      icon: UserCircle },
+  { id: 'awards',   label: '수상 & 자격증', icon: Trophy },
+  { id: 'timeline', label: '경력 & 학력',   icon: Briefcase },
+  { id: 'projects', label: '프로젝트',      icon: FolderOpen },
+  { id: 'skills',   label: '기술 스택',     icon: Code2 },
 ];
 
-const defaultProjects = [
-  {
-    id: 1,
-    title: 'E-Commerce 플랫폼',
-    description: '풀스택 전자상거래 웹사이트 - 결제, 장바구니, 관리자 대시보드 포함',
-    image: 'https://images.unsplash.com/photo-1675981004502-cb3961785a38?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxtb2Rlcm4lMjB3ZWIlMjBkZXNpZ258ZW58MXx8fHwxNzY4OTc3NTE2fDA&ixlib=rb-4.1.0&q=80&w=1080',
-    tags: ['React', 'Node.js', 'PostgreSQL', 'Stripe'],
-    longDescription: 'Next.js와 TypeScript로 구축한 풀스택 전자상거래 플랫폼입니다. Stripe를 이용한 안전한 결제 시스템, 실시간 재고 관리, 관리자 대시보드, 반응형 디자인을 포함하고 있습니다.',
-    myRole: '프론트엔드 개발 (70%) 및 백엔드 API 연동 담당. React로 사용자 인터페이스 구현, 상태 관리 최적화, Stripe 결제 시스템 통합 작업 수행.',
-    github: 'https://github.com/yourusername/ecommerce',
-    demo: 'https://demo.example.com',
-  },
-  {
-    id: 2,
-    title: '실시간 채팅 애플리케이션',
-    description: 'WebSocket을 활용한 실시간 메시징 플랫폼',
-    image: 'https://images.unsplash.com/photo-1605108222700-0d605d9ebafe?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxtb2JpbGUlMjBhcHAlMjBpbnRlcmZhY2V8ZW58MXx8fHwxNzY4OTk4NjQ5fDA&ixlib=rb-4.1.0&q=80&w=1080',
-    tags: ['React', 'Socket.io', 'Express', 'MongoDB'],
-    longDescription: 'Socket.io를 사용한 실시간 채팅 애플리케이션입니다. 개인 메시지, 그룹 채팅, 파일 공유, 온라인 상태 표시 등의 기능을 제공합니다.',
-    myRole: '풀스택 개발 (100%). Socket.io를 활용한 실시간 통신 구현, MongoDB 데이터베이스 설계, JWT 기반 인증 시스템 구축.',
-    github: 'https://github.com/yourusername/chat-app',
-  },
+const DEFAULT_INTRO: IntroData = {
+  html: '<p>안녕하세요! 저는 <strong>풀스택 개발자</strong>입니다.</p><p>이곳에 자유롭게 자기소개를 작성해보세요.</p>',
+  profileImage: null,
+};
+const DEFAULT_AWARDS: AwardItem[] = [
+  { id: 1, icon: '🏆', title: '해커톤 최우수상', description: '전국 대학생 해커톤 2023 최우수상 수상.' },
+  { id: 2, icon: '🎖️', title: 'AWS 공인 개발자', description: 'AWS Certified Developer – Associate 취득.' },
+];
+const DEFAULT_TIMELINE: TimelineItem[] = [
+  { id: 1, icon: '💼', title: '시니어 풀스택 개발자', organization: '테크 스타트업', date: '2024 ~ 현재', description: '마이크로서비스 아키텍처 설계 및 팀 리딩.' },
+  { id: 2, icon: '🎓', title: '컴퓨터공학과 졸업', organization: '○○대학교', date: '2018', description: '웹 기술 및 알고리즘 전공.' },
+];
+const DEFAULT_PROJECTS: ProjectItem[] = [
+  { id: 1, title: 'E-Commerce 플랫폼', description: '풀스택 전자상거래 웹사이트', tags: ['React','Node.js','PostgreSQL'], github: '', demo: '' },
+  { id: 2, title: '실시간 채팅 앱', description: 'WebSocket 기반 메시징 플랫폼', tags: ['React','Socket.io'], github: '', demo: '' },
+];
+const DEFAULT_SKILLS: SkillItem[] = [
+  { id: 1, name: 'React / Next.js', level: 90, experience: '3년 경력' },
+  { id: 2, name: 'Spring Boot',     level: 80, experience: '2년 경력' },
+  { id: 3, name: 'MySQL / JPA',     level: 75, experience: '2년 경력' },
 ];
 
-const defaultTimeline = [
-  {
-    icon: Trophy,
-    title: '해커톤 대상 수상',
-    organization: '2025 전국 대학생 해커톤',
-    date: '2025.11',
-    description: 'AI 기반 학습 관리 플랫폼으로 대상 수상. 팀 리더로서 프로젝트 기획 및 풀스택 개발 담당.',
-  },
-  {
-    icon: Award,
-    title: '우수 프로젝트 선정',
-    organization: '한국 소프트웨어 진흥원',
-    date: '2025.08',
-    description: '오픈소스 프로젝트 기여로 우수 개발자 인증. GitHub에서 1000+ Stars 달성.',
-  },
-];
+// ── 리치 텍스트 에디터 컴포넌트 ──────────────────────────────
+function RichEditor({ html, onChange }: { html: string; onChange: (h: string) => void }) {
+  const ref = useRef<HTMLDivElement>(null);
 
+  const exec = (cmd: string, val?: string) => {
+    document.execCommand(cmd, false, val);
+    if (ref.current) onChange(ref.current.innerHTML);
+  };
+
+  const FONTS  = ['기본', 'Arial', 'Georgia', 'Courier New', '나눔고딕', 'Noto Sans KR'];
+  const SIZES  = ['12px','14px','16px','18px','20px','24px','28px','32px'];
+  const COLORS = ['#000000','#e53e3e','#dd6b20','#d69e2e','#38a169','#3182ce','#805ad5','#d53f8c','#ffffff'];
+
+  return (
+    <div className="border border-gray-300 dark:border-gray-600 rounded-xl overflow-hidden">
+      {/* 툴바 */}
+      <div className="flex flex-wrap gap-1 p-2 bg-gray-50 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600">
+        {/* 폰트 */}
+        <select onChange={e => exec('fontName', e.target.value)}
+          className="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-500 dark:bg-gray-600 dark:text-white">
+          {FONTS.map(f => <option key={f} value={f}>{f}</option>)}
+        </select>
+        {/* 크기 */}
+        <select onChange={e => { if(ref.current){ ref.current.style.fontSize = ''; } exec('fontSize', '3'); /* hack */ setTimeout(()=>{document.querySelectorAll('font[size="3"]').forEach(el=>{ const span = document.createElement('span'); span.style.fontSize = e.target.value; span.innerHTML = (el as HTMLElement).innerHTML; el.replaceWith(span); }); if(ref.current) onChange(ref.current.innerHTML);},0); }}
+          className="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-500 dark:bg-gray-600 dark:text-white">
+          {SIZES.map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+        {/* 스타일 버튼 */}
+        <button onMouseDown={e=>{e.preventDefault();exec('bold')}} title="굵게"
+          className="px-2 py-1 rounded hover:bg-gray-200 dark:hover:bg-gray-500 font-bold text-sm">B</button>
+        <button onMouseDown={e=>{e.preventDefault();exec('italic')}} title="기울임"
+          className="px-2 py-1 rounded hover:bg-gray-200 dark:hover:bg-gray-500 italic text-sm">I</button>
+        <button onMouseDown={e=>{e.preventDefault();exec('underline')}} title="밑줄"
+          className="px-2 py-1 rounded hover:bg-gray-200 dark:hover:bg-gray-500 underline text-sm">U</button>
+        <div className="w-px bg-gray-300 dark:bg-gray-500 mx-1" />
+        <button onMouseDown={e=>{e.preventDefault();exec('justifyLeft')}} title="왼쪽 정렬"
+          className="px-2 py-1 rounded hover:bg-gray-200 dark:hover:bg-gray-500">
+          <AlignLeft className="w-3.5 h-3.5" />
+        </button>
+        <button onMouseDown={e=>{e.preventDefault();exec('justifyCenter')}} title="가운데 정렬"
+          className="px-2 py-1 rounded hover:bg-gray-200 dark:hover:bg-gray-500">
+          <AlignCenter className="w-3.5 h-3.5" />
+        </button>
+        <button onMouseDown={e=>{e.preventDefault();exec('justifyRight')}} title="오른쪽 정렬"
+          className="px-2 py-1 rounded hover:bg-gray-200 dark:hover:bg-gray-500">
+          <AlignRight className="w-3.5 h-3.5" />
+        </button>
+        <div className="w-px bg-gray-300 dark:bg-gray-500 mx-1" />
+        {/* 색상 */}
+        {COLORS.map(c => (
+          <button key={c} onMouseDown={e=>{e.preventDefault();exec('foreColor',c)}}
+            title={c} style={{ background: c }}
+            className="w-5 h-5 rounded-full border border-gray-400 flex-shrink-0" />
+        ))}
+      </div>
+      {/* 에디터 본문 */}
+      <div
+        ref={ref}
+        contentEditable
+        suppressContentEditableWarning
+        dangerouslySetInnerHTML={{ __html: html }}
+        onInput={() => { if (ref.current) onChange(ref.current.innerHTML); }}
+        className="min-h-[180px] p-4 focus:outline-none dark:bg-gray-800 dark:text-white text-sm leading-relaxed"
+      />
+    </div>
+  );
+}
+
+// ── 섹션별 뷰/편집 컴포넌트들 ────────────────────────────────
+
+function IntroSection({ data, isLoggedIn, onChange }: {
+  data: IntroData; isLoggedIn: boolean; onChange: (d: IntroData) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const handleImage = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => onChange({ ...data, profileImage: ev.target?.result as string });
+    reader.readAsDataURL(file);
+  };
+
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-sm border border-gray-200 dark:border-gray-700">
+      <div className="flex flex-col md:flex-row gap-6">
+        {/* 프로필 이미지 */}
+        <div className="flex-shrink-0 flex flex-col items-center gap-2">
+          <div
+            onClick={() => isLoggedIn && fileRef.current?.click()}
+            className={`w-32 h-32 rounded-full overflow-hidden border-4 border-blue-200 dark:border-blue-700
+                        bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center
+                        ${isLoggedIn ? 'cursor-pointer hover:opacity-80' : ''} transition-opacity`}
+          >
+            {data.profileImage
+              ? <img src={data.profileImage} alt="프로필" className="w-full h-full object-cover" />
+              : <UserCircle className="w-16 h-16 text-white" />
+            }
+          </div>
+          {isLoggedIn && (
+            <>
+              <button onClick={() => fileRef.current?.click()}
+                className="text-xs text-blue-600 dark:text-blue-400 hover:underline">
+                이미지 변경
+              </button>
+              {data.profileImage && (
+                <button onClick={() => onChange({ ...data, profileImage: null })}
+                  className="text-xs text-red-500 hover:underline">삭제</button>
+              )}
+              <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleImage} />
+            </>
+          )}
+        </div>
+
+        {/* 텍스트 영역 */}
+        <div className="flex-1">
+          <div className="flex justify-between items-center mb-3">
+            <h3 className="font-semibold text-gray-700 dark:text-gray-300 text-sm">자기소개</h3>
+            {isLoggedIn && (
+              <button onClick={() => setEditing(v => !v)}
+                className="flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:underline">
+                <Edit3 className="w-3.5 h-3.5" />
+                {editing ? '완료' : '편집'}
+              </button>
+            )}
+          </div>
+          {editing && isLoggedIn
+            ? <RichEditor html={data.html} onChange={html => onChange({ ...data, html })} />
+            : <div
+                className="prose prose-sm dark:prose-invert max-w-none text-gray-700 dark:text-gray-300 leading-relaxed"
+                dangerouslySetInnerHTML={{ __html: data.html }}
+              />
+          }
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AwardsSection({ items, isLoggedIn, onChange }: {
+  items: AwardItem[]; isLoggedIn: boolean; onChange: (items: AwardItem[]) => void;
+}) {
+  const add = () => onChange([...items, { id: Date.now(), icon: '🏅', title: '새 항목', description: '' }]);
+  const update = (id: number, field: keyof AwardItem, val: string) =>
+    onChange(items.map(x => x.id === id ? { ...x, [field]: val } : x));
+  const remove = (id: number) => onChange(items.filter(x => x.id !== id));
+
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-sm border border-gray-200 dark:border-gray-700">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {items.map(item => (
+          <div key={item.id} className="flex gap-3 p-4 bg-gray-50 dark:bg-gray-700/50 rounded-xl relative group">
+            {isLoggedIn
+              ? <input value={item.icon} onChange={e => update(item.id, 'icon', e.target.value)}
+                  className="w-10 h-10 text-2xl text-center bg-transparent focus:outline-none flex-shrink-0" />
+              : <span className="text-2xl w-10 flex-shrink-0">{item.icon}</span>
+            }
+            <div className="flex-1 min-w-0">
+              {isLoggedIn
+                ? <>
+                    <input value={item.title} onChange={e => update(item.id, 'title', e.target.value)}
+                      className="w-full font-semibold text-sm bg-transparent border-b border-gray-300 dark:border-gray-600 focus:outline-none dark:text-white mb-1" />
+                    <input value={item.description} onChange={e => update(item.id, 'description', e.target.value)}
+                      className="w-full text-xs bg-transparent focus:outline-none text-gray-500 dark:text-gray-400" />
+                  </>
+                : <>
+                    <p className="font-semibold text-sm text-gray-900 dark:text-white">{item.title}</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{item.description}</p>
+                  </>
+              }
+            </div>
+            {isLoggedIn && (
+              <button onClick={() => remove(item.id)}
+                className="absolute top-2 right-2 p-1 text-red-400 opacity-0 group-hover:opacity-100 transition-opacity">
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+      {isLoggedIn && (
+        <button onClick={add}
+          className="mt-4 flex items-center gap-1.5 text-sm text-blue-600 dark:text-blue-400 hover:underline">
+          <Plus className="w-4 h-4" /> 항목 추가
+        </button>
+      )}
+    </div>
+  );
+}
+
+function TimelineSection({ items, isLoggedIn, onChange }: {
+  items: TimelineItem[]; isLoggedIn: boolean; onChange: (items: TimelineItem[]) => void;
+}) {
+  const add = () => onChange([...items, { id: Date.now(), icon: '💼', title: '새 항목', organization: '', date: '', description: '' }]);
+  const update = (id: number, field: keyof TimelineItem, val: string) =>
+    onChange(items.map(x => x.id === id ? { ...x, [field]: val } : x));
+  const remove = (id: number) => onChange(items.filter(x => x.id !== id));
+
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-sm border border-gray-200 dark:border-gray-700">
+      <div className="space-y-4">
+        {items.map((item, i) => (
+          <motion.div key={item.id}
+            initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: i * 0.05 }}
+            className="relative pl-8 pb-6 border-l-2 border-blue-200 dark:border-blue-700 last:pb-0 group">
+            <div className="absolute -left-4 top-0 w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center text-sm shadow">
+              {isLoggedIn
+                ? <input value={item.icon} onChange={e => update(item.id, 'icon', e.target.value)}
+                    className="w-7 h-7 text-center bg-transparent focus:outline-none text-white text-sm" />
+                : item.icon
+              }
+            </div>
+            <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4 relative">
+              {isLoggedIn && (
+                <button onClick={() => remove(item.id)}
+                  className="absolute top-2 right-2 p-1 text-red-400 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              )}
+              {isLoggedIn
+                ? <div className="space-y-1.5">
+                    <div className="flex gap-2">
+                      <input value={item.title} onChange={e => update(item.id, 'title', e.target.value)}
+                        placeholder="직함/학위" className="flex-1 font-bold text-sm bg-transparent border-b border-gray-300 dark:border-gray-500 focus:outline-none dark:text-white" />
+                      <input value={item.date} onChange={e => update(item.id, 'date', e.target.value)}
+                        placeholder="기간" className="w-32 text-xs bg-transparent border-b border-gray-300 dark:border-gray-500 focus:outline-none text-gray-500 dark:text-gray-400" />
+                    </div>
+                    <input value={item.organization} onChange={e => update(item.id, 'organization', e.target.value)}
+                      placeholder="회사/학교" className="w-full text-sm text-blue-600 bg-transparent border-b border-gray-300 dark:border-gray-500 focus:outline-none font-semibold" />
+                    <input value={item.description} onChange={e => update(item.id, 'description', e.target.value)}
+                      placeholder="설명" className="w-full text-xs bg-transparent focus:outline-none text-gray-500 dark:text-gray-400" />
+                  </div>
+                : <>
+                    <div className="flex justify-between items-start mb-1">
+                      <h4 className="font-bold text-sm text-gray-900 dark:text-white">{item.title}</h4>
+                      <span className="text-xs text-gray-500 dark:text-gray-400 ml-2 flex-shrink-0">{item.date}</span>
+                    </div>
+                    <p className="text-sm text-blue-600 dark:text-blue-400 font-semibold mb-1">{item.organization}</p>
+                    <p className="text-xs text-gray-600 dark:text-gray-400">{item.description}</p>
+                  </>
+              }
+            </div>
+          </motion.div>
+        ))}
+      </div>
+      {isLoggedIn && (
+        <button onClick={add}
+          className="mt-4 flex items-center gap-1.5 text-sm text-blue-600 dark:text-blue-400 hover:underline">
+          <Plus className="w-4 h-4" /> 항목 추가
+        </button>
+      )}
+    </div>
+  );
+}
+
+function ProjectsSection({ items, isLoggedIn, onChange }: {
+  items: ProjectItem[]; isLoggedIn: boolean; onChange: (items: ProjectItem[]) => void;
+}) {
+  const add = () => onChange([...items, { id: Date.now(), title: '새 프로젝트', description: '', tags: [], github: '', demo: '' }]);
+  const update = (id: number, field: keyof ProjectItem, val: any) =>
+    onChange(items.map(x => x.id === id ? { ...x, [field]: val } : x));
+  const remove = (id: number) => onChange(items.filter(x => x.id !== id));
+
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-sm border border-gray-200 dark:border-gray-700">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {items.map((item, i) => (
+          <motion.div key={item.id}
+            initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: i * 0.05 }}
+            className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4 relative group border border-gray-200 dark:border-gray-600">
+            {isLoggedIn && (
+              <button onClick={() => remove(item.id)}
+                className="absolute top-2 right-2 p-1 text-red-400 opacity-0 group-hover:opacity-100 transition-opacity">
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            )}
+            {isLoggedIn
+              ? <div className="space-y-2">
+                  <input value={item.title} onChange={e => update(item.id, 'title', e.target.value)}
+                    className="w-full font-bold text-sm bg-transparent border-b border-gray-300 dark:border-gray-500 focus:outline-none dark:text-white" />
+                  <textarea value={item.description} onChange={e => update(item.id, 'description', e.target.value)}
+                    rows={2} placeholder="프로젝트 설명"
+                    className="w-full text-xs bg-transparent border border-gray-200 dark:border-gray-600 rounded p-1 focus:outline-none dark:text-gray-300 resize-none" />
+                  <input value={item.tags.join(', ')} onChange={e => update(item.id, 'tags', e.target.value.split(',').map(t=>t.trim()).filter(Boolean))}
+                    placeholder="태그 (쉼표로 구분)" className="w-full text-xs bg-transparent border-b border-gray-200 dark:border-gray-600 focus:outline-none text-gray-500" />
+                  <input value={item.github} onChange={e => update(item.id, 'github', e.target.value)}
+                    placeholder="GitHub URL" className="w-full text-xs bg-transparent border-b border-gray-200 dark:border-gray-600 focus:outline-none text-gray-500" />
+                  <input value={item.demo} onChange={e => update(item.id, 'demo', e.target.value)}
+                    placeholder="Demo URL" className="w-full text-xs bg-transparent border-b border-gray-200 dark:border-gray-600 focus:outline-none text-gray-500" />
+                </div>
+              : <>
+                  <h4 className="font-bold text-sm text-gray-900 dark:text-white mb-1">{item.title}</h4>
+                  <p className="text-xs text-gray-600 dark:text-gray-400 mb-3">{item.description}</p>
+                  <div className="flex flex-wrap gap-1 mb-3">
+                    {item.tags.map(t => (
+                      <span key={t} className="px-2 py-0.5 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 text-xs rounded-full">{t}</span>
+                    ))}
+                  </div>
+                  <div className="flex gap-2">
+                    {item.github && (
+                      <a href={item.github} target="_blank" rel="noopener noreferrer"
+                        className="flex items-center gap-1 text-xs text-gray-600 dark:text-gray-400 hover:text-blue-600">
+                        <Github className="w-3.5 h-3.5" /> GitHub
+                      </a>
+                    )}
+                    {item.demo && (
+                      <a href={item.demo} target="_blank" rel="noopener noreferrer"
+                        className="flex items-center gap-1 text-xs text-gray-600 dark:text-gray-400 hover:text-blue-600">
+                        <ExternalLink className="w-3.5 h-3.5" /> Demo
+                      </a>
+                    )}
+                  </div>
+                </>
+            }
+          </motion.div>
+        ))}
+      </div>
+      {isLoggedIn && (
+        <button onClick={add}
+          className="mt-4 flex items-center gap-1.5 text-sm text-blue-600 dark:text-blue-400 hover:underline">
+          <Plus className="w-4 h-4" /> 프로젝트 추가
+        </button>
+      )}
+    </div>
+  );
+}
+
+function SkillsSection({ items, isLoggedIn, onChange }: {
+  items: SkillItem[]; isLoggedIn: boolean; onChange: (items: SkillItem[]) => void;
+}) {
+  const add = () => onChange([...items, { id: Date.now(), name: '새 기술', level: 50, experience: '' }]);
+  const update = (id: number, field: keyof SkillItem, val: any) =>
+    onChange(items.map(x => x.id === id ? { ...x, [field]: val } : x));
+  const remove = (id: number) => onChange(items.filter(x => x.id !== id));
+
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-sm border border-gray-200 dark:border-gray-700">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {items.map(item => (
+          <div key={item.id} className="p-4 bg-gray-50 dark:bg-gray-700/50 rounded-xl relative group">
+            {isLoggedIn && (
+              <button onClick={() => remove(item.id)}
+                className="absolute top-2 right-2 p-1 text-red-400 opacity-0 group-hover:opacity-100 transition-opacity">
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            )}
+            {isLoggedIn
+              ? <div className="space-y-2">
+                  <input value={item.name} onChange={e => update(item.id, 'name', e.target.value)}
+                    className="w-full font-semibold text-sm bg-transparent border-b border-gray-300 dark:border-gray-500 focus:outline-none dark:text-white" />
+                  <input value={item.experience} onChange={e => update(item.id, 'experience', e.target.value)}
+                    placeholder="경력" className="w-full text-xs bg-transparent border-b border-gray-200 dark:border-gray-600 focus:outline-none text-gray-500" />
+                  <div className="flex items-center gap-2">
+                    <input type="range" min={0} max={100} value={item.level}
+                      onChange={e => update(item.id, 'level', Number(e.target.value))}
+                      className="flex-1" />
+                    <span className="text-xs font-bold text-blue-600 w-8">{item.level}%</span>
+                  </div>
+                </div>
+              : <>
+                  <div className="flex justify-between items-center mb-1">
+                    <p className="font-semibold text-sm text-gray-900 dark:text-white">{item.name}</p>
+                    <span className="text-xs text-blue-600 dark:text-blue-400 font-bold">{item.level}%</span>
+                  </div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">{item.experience}</p>
+                  <div className="w-full bg-gray-200 dark:bg-gray-600 rounded-full h-1.5">
+                    <motion.div className="bg-blue-500 h-1.5 rounded-full"
+                      initial={{ width: 0 }} animate={{ width: `${item.level}%` }}
+                      transition={{ duration: 0.8, ease: 'easeOut' }} />
+                  </div>
+                </>
+            }
+          </div>
+        ))}
+      </div>
+      {isLoggedIn && (
+        <button onClick={add}
+          className="mt-4 flex items-center gap-1.5 text-sm text-blue-600 dark:text-blue-400 hover:underline">
+          <Plus className="w-4 h-4" /> 기술 추가
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ── 메인 App ─────────────────────────────────────────────────
 export default function App() {
-  const [selectedProject, setSelectedProject] = useState<any>(null);
-  const [selectedSkill, setSelectedSkill] = useState<any>(null);
-  const [selectedTimeline, setSelectedTimeline] = useState<any>(null);
-  const [showAuthModal, setShowAuthModal] = useState(false);
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [editType, setEditType] = useState<'project' | 'skill' | 'timeline'>('project');
-  const [editData, setEditData] = useState<any>(null);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [username, setUsername] = useState('');
-  const [isDarkMode, setIsDarkMode] = useState(false);
+  const [isLoggedIn,       setIsLoggedIn]       = useState(false);
+  const [username,         setUsername]         = useState('');
+  const [githubUrl,        setGithubUrl]        = useState('');
+  const [userEmail,        setUserEmail]        = useState('');
+  const [isDarkMode,       setIsDarkMode]       = useState(false);
+  const [showAuthModal,    setShowAuthModal]    = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
 
-  const [skills, setSkills] = useState(defaultSkills);
-  const [projects, setProjects] = useState(defaultProjects);
-  const [timeline, setTimeline] = useState(defaultTimeline);
+  // 섹션 순서
+  const [sectionOrder, setSectionOrder] = useState<SectionType[]>(
+    ['intro','awards','timeline','projects','skills']
+  );
+  // 데이터
+  const [intro,    setIntro]    = useState<IntroData>(DEFAULT_INTRO);
+  const [awards,   setAwards]   = useState<AwardItem[]>(DEFAULT_AWARDS);
+  const [timeline, setTimeline] = useState<TimelineItem[]>(DEFAULT_TIMELINE);
+  const [projects, setProjects] = useState<ProjectItem[]>(DEFAULT_PROJECTS);
+  const [skills,   setSkills]   = useState<SkillItem[]>(DEFAULT_SKILLS);
 
-  // ─── 앱 초기화: JWT 토큰으로 로그인 상태 복원 ───────────
   useEffect(() => {
     if (tokenStorage.isLoggedIn()) {
       const user = tokenStorage.getUser();
       if (user) {
         setIsLoggedIn(true);
-        setUsername(user.username);
-        loadUserData(user.username);
+        setUsername(user.username || '');
+        setGithubUrl(user.githubUrl || '');
+        setUserEmail(user.email || '');
+        loadData(user.username || '');
       }
     }
   }, []);
 
-  useEffect(() => {
-    if (isDarkMode) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
-  }, [isDarkMode]);
+  useEffect(() => { document.documentElement.classList.toggle('dark', isDarkMode); }, [isDarkMode]);
 
-  const loadUserData = (user: string) => {
-    const userData = localStorage.getItem(`portfolio_data_${user}`);
-    if (userData) {
-      const data = JSON.parse(userData);
-      setSkills(data.skills || defaultSkills);
-      setProjects(data.projects || defaultProjects);
-      setTimeline(data.timeline || defaultTimeline);
-    }
+  const loadData = (u: string) => {
+    try {
+      const raw = localStorage.getItem(`portfolio_v2_${u}`);
+      if (raw) {
+        const d = JSON.parse(raw);
+        if (d.intro)    setIntro(d.intro);
+        if (d.awards)   setAwards(d.awards);
+        if (d.timeline) setTimeline(d.timeline);
+        if (d.projects) setProjects(d.projects);
+        if (d.skills)   setSkills(d.skills);
+        if (d.sectionOrder) setSectionOrder(d.sectionOrder);
+      }
+    } catch {}
   };
 
-  const saveUserData = () => {
-    if (username) {
-      const data = { skills, projects, timeline };
-      localStorage.setItem(`portfolio_data_${username}`, JSON.stringify(data));
-    }
-  };
+  const save = useCallback(() => {
+    if (!username) return;
+    localStorage.setItem(`portfolio_v2_${username}`, JSON.stringify({
+      intro, awards, timeline, projects, skills, sectionOrder
+    }));
+  }, [username, intro, awards, timeline, projects, skills, sectionOrder]);
 
-  useEffect(() => {
-    if (isLoggedIn) {
-      saveUserData();
-    }
-  }, [skills, projects, timeline]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { if (isLoggedIn) save(); }, [intro, awards, timeline, projects, skills, sectionOrder]);
 
-  // ─── 로그인 성공 콜백 (AuthModal → App) ───────────────
   const handleLogin = (user: string) => {
     setIsLoggedIn(true);
     setUsername(user);
-    loadUserData(user);
+    const stored = tokenStorage.getUser();
+    if (stored) {
+      setGithubUrl(stored.githubUrl || '');
+      setUserEmail(stored.email || '');
+    }
+    loadData(user);
   };
 
-  // ─── 로그아웃: JWT 토큰 제거 ──────────────────────────
   const handleLogout = () => {
-    logout();                     // tokenStorage.clear() 호출
+    tokenStorage.clear();
     setIsLoggedIn(false);
     setUsername('');
-    setSkills(defaultSkills);
-    setProjects(defaultProjects);
-    setTimeline(defaultTimeline);
+    setGithubUrl('');
+    setUserEmail('');
+    setIntro(DEFAULT_INTRO);
+    setAwards(DEFAULT_AWARDS);
+    setTimeline(DEFAULT_TIMELINE);
+    setProjects(DEFAULT_PROJECTS);
+    setSkills(DEFAULT_SKILLS);
+    setSectionOrder(['intro','awards','timeline','projects','skills']);
   };
 
-  const handleEdit = (type: 'project' | 'skill' | 'timeline', data?: any) => {
-    setEditType(type);
-    setEditData(data);
-    setShowEditModal(true);
+  const moveSection = (idx: number, dir: -1 | 1) => {
+    const next = [...sectionOrder];
+    const swap = idx + dir;
+    if (swap < 0 || swap >= next.length) return;
+    [next[idx], next[swap]] = [next[swap], next[idx]];
+    setSectionOrder(next);
   };
 
-  const handleSave = (data: any) => {
-    if (editType === 'project') {
-      if (editData) {
-        setProjects(projects.map(p => p.id === editData.id ? { ...data, id: editData.id } : p));
-      } else {
-        setProjects([...projects, { ...data, id: Date.now() }]);
-      }
-    } else if (editType === 'skill') {
-      if (editData) {
-        setSkills(skills.map(s => s.name === editData.name ? { ...s, ...data } : s));
-      } else {
-        setSkills([...skills, { ...data, icon: Code2 }]);
-      }
-    } else if (editType === 'timeline') {
-      if (editData) {
-        setTimeline(timeline.map((t, i) => timeline.indexOf(editData) === i ? { ...t, ...data } : t));
-      } else {
-        setTimeline([...timeline, { ...data, icon: Award }]);
-      }
-    }
-  };
-
-  const handleDelete = (type: 'project' | 'skill' | 'timeline', item: any) => {
-    if (!window.confirm('정말 삭제하시겠습니까?')) return;
-    
-    if (type === 'project') {
-      setProjects(projects.filter(p => p.id !== item.id));
-    } else if (type === 'skill') {
-      setSkills(skills.filter(s => s.name !== item.name));
-    } else if (type === 'timeline') {
-      setTimeline(timeline.filter(t => t !== item));
-    }
+  const renderSection = (id: SectionType, idx: number) => {
+    const meta = SECTION_META.find(s => s.id === id)!;
+    return (
+      <section key={id}>
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <meta.icon className="w-5 h-5 text-blue-500" />
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white">{meta.label}</h2>
+          </div>
+          {isLoggedIn && (
+            <div className="flex items-center gap-1">
+              <button onClick={() => moveSection(idx, -1)} disabled={idx === 0}
+                className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-30 transition-colors" title="위로">
+                <ChevronUp className="w-4 h-4 text-gray-500" />
+              </button>
+              <button onClick={() => moveSection(idx, 1)} disabled={idx === sectionOrder.length - 1}
+                className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-30 transition-colors" title="아래로">
+                <ChevronDown className="w-4 h-4 text-gray-500" />
+              </button>
+            </div>
+          )}
+        </div>
+        {id === 'intro'    && <IntroSection    data={intro}    isLoggedIn={isLoggedIn} onChange={setIntro} />}
+        {id === 'awards'   && <AwardsSection   items={awards}  isLoggedIn={isLoggedIn} onChange={setAwards} />}
+        {id === 'timeline' && <TimelineSection items={timeline} isLoggedIn={isLoggedIn} onChange={setTimeline} />}
+        {id === 'projects' && <ProjectsSection items={projects} isLoggedIn={isLoggedIn} onChange={setProjects} />}
+        {id === 'skills'   && <SkillsSection   items={skills}  isLoggedIn={isLoggedIn} onChange={setSkills} />}
+      </section>
+    );
   };
 
   return (
-    <div className="min-h-screen relative">
-      {/* Background */}
-      <div 
-        className="fixed inset-0 z-0 transition-colors duration-500"
-        style={{
-          backgroundColor: isDarkMode ? '#0f172a' : '#f0f9ff',
-        }}
-      />
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 dark:from-gray-900 dark:to-gray-800 transition-colors">
 
-      {/* Top Controls */}
-      <div className="fixed top-4 left-4 z-50">
-        <button
-          onClick={() => setIsDarkMode(!isDarkMode)}
-          className="p-3 bg-white/70 dark:bg-gray-800/70 backdrop-blur-md rounded-full shadow-lg border border-gray-200 dark:border-gray-700 hover:bg-white/90 dark:hover:bg-gray-800/90 transition-colors"
-        >
-          {isDarkMode ? <Sun className="w-6 h-6 text-yellow-400" /> : <Moon className="w-6 h-6 text-gray-700" />}
-        </button>
-      </div>
-
-      <div className="fixed top-4 right-4 z-50 flex gap-2">
-        {isLoggedIn ? (
-          <>
-            <span className="px-4 py-2 bg-white/70 dark:bg-gray-800/70 backdrop-blur-md rounded-full shadow-lg border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white font-medium">
-              {username}
-            </span>
-            <button
-              onClick={handleLogout}
-              className="p-3 bg-white/70 dark:bg-gray-800/70 backdrop-blur-md rounded-full shadow-lg border border-gray-200 dark:border-gray-700 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors"
-            >
-              <LogOut className="w-6 h-6 text-gray-700 dark:text-gray-300" />
+      {/* ── 헤더 ── */}
+      <header className="sticky top-0 z-40 bg-white/90 dark:bg-gray-900/90 backdrop-blur-md border-b border-gray-200 dark:border-gray-700">
+        <div className="max-w-4xl mx-auto px-4 py-3 flex justify-between items-center">
+          <h1 className="text-lg font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+            Portfolio
+          </h1>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setIsDarkMode(d => !d)}
+              className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+              {isDarkMode ? <Sun className="w-4 h-4 text-yellow-400" /> : <Moon className="w-4 h-4 text-gray-600" />}
             </button>
-          </>
-        ) : (
-          <button
-            onClick={() => setShowAuthModal(true)}
-            className="px-6 py-3 bg-blue-600 text-white rounded-full shadow-lg hover:bg-blue-700 transition-colors font-medium"
-          >
-            로그인
-          </button>
-        )}
-      </div>
+            {isLoggedIn ? (
+              <>
+                <button onClick={() => setShowProfileModal(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-medium
+                             bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/30 dark:hover:bg-blue-900/50
+                             text-blue-700 dark:text-blue-300 transition-colors">
+                  <UserCircle className="w-4 h-4" /> {username}
+                </button>
+                <button onClick={handleLogout}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-sm font-medium
+                             bg-red-50 hover:bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 transition-colors">
+                  <LogOut className="w-4 h-4" /> 로그아웃
+                </button>
+              </>
+            ) : (
+              <button onClick={() => setShowAuthModal(true)}
+                className="px-4 py-1.5 rounded-xl text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white transition-colors">
+                로그인
+              </button>
+            )}
+          </div>
+        </div>
+      </header>
 
-      {/* Content */}
-      <div className="relative z-10">
-        {/* Hero Section */}
-        <section className="container mx-auto px-4 py-20">
-          <motion.div
-            initial={{ opacity: 0, y: 30 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6 }}
-            className="text-center"
-          >
-            <h1 className="text-5xl md:text-6xl font-bold mb-6 bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-              풀스택 개발자
-            </h1>
-            <p className="text-xl text-gray-800 dark:text-gray-200 mb-8 max-w-2xl mx-auto">
-              열정적으로 웹과 모바일 애플리케이션을 만들고 있습니다.
-              사용자 경험과 코드 품질에 집중합니다.
+      <main className="max-w-4xl mx-auto px-4 py-10 space-y-12">
+
+        {/* ── 상단 이름 + 소셜 링크 ── */}
+        <div className="text-center space-y-3">
+          <h2 className="text-3xl sm:text-4xl font-bold text-gray-900 dark:text-white">
+            {username ? `${username}의 포트폴리오` : '나의 포트폴리오'}
+          </h2>
+          <div className="flex justify-center gap-3">
+            {/* GitHub: githubUrl 있으면 링크, 없으면 비활성 */}
+            {githubUrl ? (
+              <a href={githubUrl} target="_blank" rel="noopener noreferrer"
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gray-900 dark:bg-gray-700 text-white text-sm hover:bg-gray-700 transition-colors">
+                <Github className="w-4 h-4" /> GitHub
+              </a>
+            ) : (
+              <div className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gray-200 dark:bg-gray-700 text-gray-400 text-sm cursor-default">
+                <Github className="w-4 h-4" /> GitHub
+              </div>
+            )}
+            {/* 이메일: userEmail 있으면 mailto 링크 */}
+            {userEmail ? (
+              <a href={`mailto:${userEmail}`}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-blue-600 text-white text-sm hover:bg-blue-700 transition-colors">
+                <Mail className="w-4 h-4" /> 이메일
+              </a>
+            ) : (
+              <div className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gray-200 dark:bg-gray-700 text-gray-400 text-sm cursor-default">
+                <Mail className="w-4 h-4" /> 이메일
+              </div>
+            )}
+          </div>
+          {isLoggedIn && (!githubUrl || !userEmail) && (
+            <p className="text-xs text-gray-400 dark:text-gray-500">
+              💡 <button onClick={() => setShowProfileModal(true)} className="text-blue-500 hover:underline">개인정보</button>에서 GitHub·이메일을 등록하면 버튼이 활성화됩니다.
             </p>
-            <div className="flex justify-center gap-4 mb-6">
-              <a href="https://github.com" target="_blank" rel="noopener noreferrer" className="p-3 bg-white/60 dark:bg-gray-800/60 backdrop-blur-sm text-gray-800 dark:text-gray-200 rounded-full hover:bg-white/80 dark:hover:bg-gray-800/80 transition-colors border border-gray-200 dark:border-gray-700 shadow-lg">
-                <Github className="w-6 h-6" />
-              </a>
-              <a href="https://linkedin.com" target="_blank" rel="noopener noreferrer" className="p-3 bg-blue-500/60 backdrop-blur-sm text-white rounded-full hover:bg-blue-500/80 transition-colors border border-blue-300 shadow-lg">
-                <Linkedin className="w-6 h-6" />
-              </a>
-              <a href="mailto:your@email.com" className="p-3 bg-purple-500/60 backdrop-blur-sm text-white rounded-full hover:bg-purple-500/80 transition-colors border border-purple-300 shadow-lg">
-                <Mail className="w-6 h-6" />
-              </a>
-            </div>
-            <a 
-              href="https://github.com/yourusername" 
-              target="_blank" 
-              rel="noopener noreferrer"
-              className="inline-block text-blue-700 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 hover:underline font-medium"
-            >
-              github.com/yourusername
-            </a>
-          </motion.div>
-        </section>
+          )}
+        </div>
 
-        {/* Tips Section */}
-        <TipsSection />
-
-        {/* Timeline Section */}
-        <section className="container mx-auto px-4 py-20">
-          <div className="flex justify-between items-center mb-4">
-            <motion.h2
-              initial={{ opacity: 0 }}
-              whileInView={{ opacity: 1 }}
-              viewport={{ once: true }}
-              className="text-4xl font-bold text-gray-900 dark:text-white"
-            >
-              경력 및 수상 내역
-            </motion.h2>
-            {isLoggedIn && (
-              <button
-                onClick={() => handleEdit('timeline')}
-                className="p-3 bg-blue-600 text-white rounded-full hover:bg-blue-700 transition-colors shadow-lg"
-              >
-                <Plus className="w-6 h-6" />
-              </button>
-            )}
+        {/* ── 섹션 순서 안내 (로그인 시) ── */}
+        {isLoggedIn && (
+          <div className="flex items-center gap-2 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-xl text-sm text-blue-700 dark:text-blue-300">
+            <GripVertical className="w-4 h-4 flex-shrink-0" />
+            각 섹션 우측의 <ChevronUp className="w-3.5 h-3.5 inline" /> <ChevronDown className="w-3.5 h-3.5 inline" /> 버튼으로 섹션 순서를 변경할 수 있습니다.
           </div>
-          <p className="text-center text-gray-700 dark:text-gray-300 mb-12">
-            각 항목을 클릭하면 관련 서류를 확인하고 등록할 수 있습니다
-          </p>
-          <div className="max-w-4xl mx-auto">
-            {timeline.map((item, index) => (
-              <div key={index} className="relative group">
-                <TimelineItem
-                  icon={item.icon}
-                  title={item.title}
-                  organization={item.organization}
-                  date={item.date}
-                  description={item.description}
-                  index={index}
-                  onClick={() => setSelectedTimeline(item)}
-                />
-                {isLoggedIn && (
-                  <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-2">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleEdit('timeline', item);
-                      }}
-                      className="p-2 bg-blue-600 text-white rounded-full hover:bg-blue-700 shadow-lg"
-                    >
-                      <Edit className="w-4 h-4" />
-                    </button>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </section>
+        )}
 
-        {/* Skills Section */}
-        <section className="container mx-auto px-4 py-20">
-          <div className="flex justify-between items-center mb-4">
-            <motion.h2
-              initial={{ opacity: 0 }}
-              whileInView={{ opacity: 1 }}
-              viewport={{ once: true }}
-              className="text-4xl font-bold text-gray-900 dark:text-white"
-            >
-              기술 스택
-            </motion.h2>
-            {isLoggedIn && (
-              <button
-                onClick={() => handleEdit('skill')}
-                className="p-3 bg-blue-600 text-white rounded-full hover:bg-blue-700 transition-colors shadow-lg"
-              >
-                <Plus className="w-6 h-6" />
-              </button>
-            )}
-          </div>
-          <p className="text-center text-gray-700 dark:text-gray-300 mb-12">
-            각 카드를 클릭하면 상세 능력을 확인할 수 있습니다
-          </p>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {skills.map((skill, index) => (
-              <div key={skill.name} className="relative group">
-                <SkillCard
-                  icon={skill.icon}
-                  name={skill.name}
-                  level={skill.level}
-                  index={index}
-                  onClick={() => setSelectedSkill(skill)}
-                />
-                {isLoggedIn && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleEdit('skill', skill);
-                    }}
-                    className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity p-2 bg-blue-600 text-white rounded-full hover:bg-blue-700 shadow-lg"
-                  >
-                    <Edit className="w-4 h-4" />
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-        </section>
+        {/* ── 섹션들 ── */}
+        {sectionOrder.map((id, idx) => renderSection(id, idx))}
 
-        {/* Projects Section */}
-        <section className="container mx-auto px-4 py-20">
-          <div className="flex justify-between items-center mb-12">
-            <motion.h2
-              initial={{ opacity: 0 }}
-              whileInView={{ opacity: 1 }}
-              viewport={{ once: true }}
-              className="text-4xl font-bold text-gray-900 dark:text-white"
-            >
-              프로젝트
-            </motion.h2>
-            {isLoggedIn && (
-              <button
-                onClick={() => handleEdit('project')}
-                className="p-3 bg-blue-600 text-white rounded-full hover:bg-blue-700 transition-colors shadow-lg"
-              >
-                <Plus className="w-6 h-6" />
-              </button>
-            )}
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-            {projects.map((project, index) => (
-              <div key={project.id} className="relative group">
-                <ProjectCard
-                  project={project}
-                  onClick={() => setSelectedProject(project)}
-                  index={index}
-                />
-                {isLoggedIn && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleEdit('project', project);
-                    }}
-                    className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity p-2 bg-blue-600 text-white rounded-full hover:bg-blue-700 shadow-lg"
-                  >
-                    <Edit className="w-4 h-4" />
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-        </section>
+      </main>
 
-        {/* Footer */}
-        <footer className="bg-white/50 dark:bg-gray-900/50 backdrop-blur-sm text-gray-800 dark:text-gray-200 py-8 border-t border-gray-200 dark:border-gray-700">
-          <div className="container mx-auto px-4 text-center">
-            <p className="text-gray-600 dark:text-gray-400">© 2026 Portfolio. All rights reserved.</p>
-          </div>
-        </footer>
-      </div>
-
-      {/* Modals */}
-      {showAuthModal && (
-        <AuthModal
-          onClose={() => setShowAuthModal(false)}
-          onLogin={handleLogin}
-        />
-      )}
-
-      {selectedProject && (
-        <ProjectModal
-          project={selectedProject}
-          onClose={() => setSelectedProject(null)}
-          isLoggedIn={isLoggedIn}
-          onEdit={() => {
-            handleEdit('project', selectedProject);
-            setSelectedProject(null);
-          }}
-          onDelete={() => {
-            handleDelete('project', selectedProject);
-            setSelectedProject(null);
-          }}
-        />
-      )}
-
-      {selectedSkill && (
-        <SkillModal
-          skill={selectedSkill}
-          onClose={() => setSelectedSkill(null)}
-          isLoggedIn={isLoggedIn}
-          onEdit={() => {
-            handleEdit('skill', selectedSkill);
-            setSelectedSkill(null);
-          }}
-        />
-      )}
-
-      {selectedTimeline && (
-        <TimelineModal
-          item={selectedTimeline}
-          onClose={() => setSelectedTimeline(null)}
-        />
-      )}
-
-      {showEditModal && (
-        <EditModal
-          type={editType}
-          data={editData}
-          onClose={() => {
-            setShowEditModal(false);
-            setEditData(null);
-          }}
-          onSave={handleSave}
-        />
-      )}
+      {/* ── 모달 ── */}
+      <AnimatePresence>
+        {showAuthModal && (
+          <AuthModal onClose={() => setShowAuthModal(false)} onLogin={handleLogin} />
+        )}
+        {showProfileModal && (
+          <ProfileModal onClose={() => {
+            setShowProfileModal(false);
+            // 프로필 저장 후 githubUrl, email 갱신
+            const user = tokenStorage.getUser();
+            if (user) {
+              setGithubUrl(user.githubUrl || '');
+              setUserEmail(user.email || '');
+              setUsername(user.username || '');
+            }
+          }} />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

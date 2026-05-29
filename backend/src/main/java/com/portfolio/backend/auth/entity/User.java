@@ -35,21 +35,17 @@ public class User {
     @Builder.Default
     private Role role = Role.USER;
 
+    @Column(length = 100)
+    private String organization;
+
+    @Column(length = 255)
+    private String githubUrl;
+
     @CreatedDate
     @Column(updatable = false)
     private LocalDateTime createdAt;
 
     public enum Role {
         USER, ADMIN
-    }
-
-    public String getOrganization() {
-        // TODO Auto-generated method stub
-        throw new UnsupportedOperationException("Unimplemented method 'getOrganization'");
-    }
-
-    public String getGithubUrl() {
-        // TODO Auto-generated method stub
-        throw new UnsupportedOperationException("Unimplemented method 'getGithubUrl'");
     }
 }

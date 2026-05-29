@@ -10,4 +10,6 @@ public class SignupRequest {
     private String email;
     private String password;
     private String username;
+    private String organization;
+    private String githubUrl;
 }

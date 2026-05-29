@@ -3,6 +3,8 @@ package com.portfolio.backend.auth.controller;
 import com.portfolio.backend.auth.dto.AuthResponse;
 import com.portfolio.backend.auth.dto.LoginRequest;
 import com.portfolio.backend.auth.dto.SignupRequest;
+import com.portfolio.backend.auth.dto.UpdateProfileRequest;
+import com.portfolio.backend.auth.dto.UserProfileResponse;
 import com.portfolio.backend.auth.service.AuthService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -19,32 +21,31 @@ public class AuthController {
 
     private final AuthService authService;
 
-    // 회원가입
     @PostMapping("/signup")
     public ResponseEntity<AuthResponse> signup(@RequestBody SignupRequest request) {
         return ResponseEntity.ok(authService.signup(request));
     }
 
-    // 로그인
     @PostMapping("/login")
     public ResponseEntity<AuthResponse> login(@RequestBody LoginRequest request) {
         return ResponseEntity.ok(authService.login(request));
     }
 
-    // 토큰 갱신
     @PostMapping("/refresh")
     public ResponseEntity<AuthResponse> refresh(@RequestBody Map<String, String> body) {
-        String refreshToken = body.get("refreshToken");
-        return ResponseEntity.ok(authService.refresh(refreshToken));
+        return ResponseEntity.ok(authService.refresh(body.get("refreshToken")));
     }
 
-    // 내 정보 조회 (인증 필요)
     @GetMapping("/me")
-    public ResponseEntity<Map<String, String>> me(
+    public ResponseEntity<UserProfileResponse> me(
             @AuthenticationPrincipal UserDetails userDetails) {
-        return ResponseEntity.ok(Map.of(
-                "email", userDetails.getUsername(),
-                "role", userDetails.getAuthorities().iterator().next().getAuthority()
-        ));
+        return ResponseEntity.ok(authService.getProfile(userDetails.getUsername()));
+    }
+
+    @PutMapping("/me")
+    public ResponseEntity<UserProfileResponse> updateMe(
+            @AuthenticationPrincipal UserDetails userDetails,
+            @RequestBody UpdateProfileRequest request) {
+        return ResponseEntity.ok(authService.updateProfile(userDetails.getUsername(), request));
     }
 }
